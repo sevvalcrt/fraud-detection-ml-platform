@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Env
+.env
+
+# Docker
+*.log
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
