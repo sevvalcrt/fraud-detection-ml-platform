@@ -1,120 +1,63 @@
-# Real-Time Fraud Detection ML Platform
+# Fraud Detection ML Platform
 
-Uçtan uca, ölçeklenebilir bir makine öğrenmesi platformu: gerçek zamanlı işlem
-verisinin alınmasından (ingestion), özellik mühendisliğine, model
-versiyonlamaya ve ölçeklenebilir servis edilmeye kadar tüm boru hattını kapsar.
+An end-to-end, scalable machine learning platform for real-time fraud detection on transaction data. Built as a follow-up to the [network security monitor](https://github.com/sevvalcrt/network-security-monitor) project — same core idea (catching anomalous behavior in real time), but this time focused on building a production-grade, scalable ML system rather than a single detection script.
 
-Bu proje, önceki [network security monitor](#) projesinin doğal devamı olarak
-tasarlandı: burada da temel problem "anormal davranışı gerçek zamanlı
-yakalamak", ancak bu kez odak tek bir tespit algoritması değil, **production
-kalitesinde, ölçeklenen bir sistem mimarisi** kurmak.
+**Status:** Work in progress — Phase 1 of 6 complete.
 
-> **Durum:** 🚧 Aktif geliştirme — Faz 1/6 tamamlandı (bkz. [Yol Haritası](#yol-haritası))
+## Features
 
----
+- Synthetic real-time transaction data generator (user, amount, location, device, timestamp)
+- Two embedded fraud patterns for realistic testing: abnormally high amounts, and "impossible velocity" (transactions from different locations too quickly)
+- Kafka-based event streaming pipeline
+- Kafka UI for live visual inspection of the data stream
+- Redis instance provisioned for the upcoming feature store
 
-## Neden Bu Proje?
+*(Planned: stream-based feature engineering, model training/versioning with MLflow, FastAPI serving on Kubernetes, Prometheus/Grafana monitoring, CI/CD — see [Roadmap](#roadmap))*
 
-Çoğu "fraud detection" projesi statik bir CSV üzerinde model eğitip
-%95 accuracy raporlamakla sınırlı kalıyor. Bu proje bilinçli olarak farklı bir
-soruyu merkeze alıyor: **"Bu model production'da, saniyede yüzlerce işlemle,
-nasıl güvenilir şekilde çalışır?"**
+## How It Works
 
-Bu yüzden model doğruluğu değil, aşağıdakiler önceliklidir:
-- Gerçek zamanlı veri akışı (Kafka)
-- Tutarlı özellik yönetimi (feature store)
-- Model versiyonlama ve tekrar üretilebilirlik (MLflow)
-- Yatay ölçeklenebilirlik (Kubernetes)
-- Sistem ve model sağlığının izlenebilirliği (Prometheus/Grafana)
-- Otomatik test ve deploy (CI/CD)
+A Python producer generates synthetic transaction events using the Faker library and streams them continuously to a Kafka topic (`transactions`) at a configurable rate (default ~5 events/sec). About 3% of events are intentionally generated as fraud, using one of two patterns:
 
----
+- **High amount** — a transaction far above the user's normal range
+- **Impossible velocity** — a transaction placed too soon after one from a different location to be physically possible
 
-## Mimari
+This is the first stage of a larger pipeline: later stages will consume this stream to compute features in real time, train and version a fraud detection model, and serve predictions through a scalable API — all while remaining observable end-to-end.
 
-```
-┌─────────────┐     ┌───────┐     ┌──────────────────┐     ┌───────────────┐
-│  Transaction │────▶│ Kafka │────▶│ Stream Processor  │────▶│ Feature Store │
-│  Producer    │     │       │     │ (feature eng.)    │     │ (Redis)       │
-└─────────────┘     └───────┘     └──────────────────┘     └───────┬───────┘
-                                                                     │
-                                                                     ▼
-┌───────────────┐     ┌──────────────┐     ┌──────────────────────────┐
-│  Client/API   │────▶│ FastAPI      │◀────│ Model Registry (MLflow)  │
-│  Request      │     │ Serving      │     └──────────────────────────┘
-└───────────────┘     └──────┬───────┘
-                              │
-                              ▼
-                    ┌───────────────────┐
-                    │ Prometheus/Grafana │  (tüm katmanları izler)
-                    └───────────────────┘
+## Tech Stack
 
-Tüm servisler Docker + Kubernetes üzerinde çalışır.
-CI/CD (GitHub Actions) her commit'te test + deploy tetikler.
-```
+- Python 3 (data generation, `kafka-python`, `Faker`)
+- Apache Kafka + Zookeeper (event streaming)
+- Redis (feature store — provisioned, not yet used)
+- Docker Compose (local infrastructure)
+- Kafka UI (stream inspection)
 
----
+*(Planned additions: MLflow, FastAPI, Kubernetes, Prometheus, Grafana, GitHub Actions — see [Roadmap](#roadmap))*
 
-## Proje Yapısı
-
-```
-fraud-detection-ml-platform/
-├── infra/              # docker-compose, k8s manifest'leri
-├── producer/           # Kafka'ya sentetik işlem verisi üreten servis
-├── processor/          # Stream processing + feature engineering (Faz 2)
-├── serving/            # FastAPI model serving katmanı (Faz 4)
-├── notebooks/          # Model eğitimi / deney defterleri (Faz 3)
-├── docs/               # Yol haritası, mimari notları, ölçüm sonuçları
-└── README.md
-```
-
----
-
-## Yol Haritası
-
-| Faz | Konu | Durum |
-|---|---|---|
-| 1 | Veri akışı — sentetik işlem üreteci + Kafka | ✅ Tamamlandı |
-| 2 | Stream processing + feature store (Redis) | ⬜ Planlandı |
-| 3 | Model eğitimi + versiyonlama (MLflow) | ⬜ Planlandı |
-| 4 | FastAPI serving + Kubernetes ölçekleme + load test | ⬜ Planlandı |
-| 5 | İzlenebilirlik (Prometheus/Grafana) + model drift tespiti | ⬜ Planlandı |
-| 6 | CI/CD + dokümantasyon cilalama | ⬜ Planlandı |
-
-Detaylı haftalık plan için: [`docs/roadmap.md`](docs/roadmap.md)
-
----
-
-## Faz 1: Veri Akışı (Şu An Burada)
-
-**Ne yapıyor:** `producer/transaction_producer.py`, Faker kütüphanesiyle
-gerçekçi işlem verisi üretir (kullanıcı, tutar, konum, cihaz, zaman damgası)
-ve bunu sürekli Kafka'nın `transactions` topic'ine yazar. Verinin ~%3'üne
-bilinçli olarak iki fraud pattern'i gömülür:
-
-- **`high_amount`** — kullanıcının normal davranışına göre anormal yüksek tutar
-- **`impossible_velocity`** — kısa sürede farklı coğrafi konumdan işlem (fiziksel olarak imkansız hız)
-
-### Kurulum ve Çalıştırma
+## Installation & Usage
 
 ```bash
-# 1. Kafka + Redis + Kafka UI'ı ayağa kaldır
+git clone https://github.com/sevvalcrt/fraud-detection-ml-platform.git
+cd fraud-detection-ml-platform
+
+# 1. Start Kafka, Zookeeper, Redis, and Kafka UI
 cd infra
 docker compose up -d
 
-# 2. Python bağımlılıklarını kur
+# 2. Install Python dependencies
 cd ../producer
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# 3. Üreteci başlat
+# 3. Start streaming synthetic transactions
 python transaction_producer.py
 ```
 
-Kafka UI üzerinden akan veriyi canlı izleyebilirsin: **http://localhost:8080**
+Watch the live stream in Kafka UI: **http://localhost:8080**
 
-### Doğrulama
+## Testing
+
+Verify events are landing in Kafka:
 
 ```bash
 docker exec -it kafka kafka-console-consumer \
@@ -123,30 +66,17 @@ docker exec -it kafka kafka-console-consumer \
   --from-beginning
 ```
 
----
+## Roadmap
 
-## Kullanılan Teknolojiler
+- [x] Kafka infrastructure + synthetic transaction producer
+- [ ] Stream processing + feature store (Redis)
+- [ ] Model training + versioning (MLflow)
+- [ ] FastAPI serving + Kubernetes horizontal scaling + load testing
+- [ ] Observability (Prometheus/Grafana) + model drift detection
+- [ ] CI/CD pipeline + documentation polish
 
-| Katman | Teknoloji |
-|---|---|
-| Mesajlaşma | Apache Kafka |
-| Feature Store | Redis |
-| Model Yönetimi | MLflow |
-| Serving | FastAPI |
-| Konteynerleştirme | Docker |
-| Orkestrasyon | Kubernetes |
-| İzleme | Prometheus + Grafana |
-| CI/CD | GitHub Actions |
-| Yük Testi | Locust |
+Full weekly breakdown: [`docs/roadmap.md`](docs/roadmap.md)
 
----
-
-## Ölçüm Sonuçları
-
-*(Faz 4 tamamlandığında buraya gerçek throughput/latency sayıları eklenecek.)*
-
----
-
-## Lisans
+## License
 
 MIT

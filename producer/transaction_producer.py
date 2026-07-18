@@ -1,10 +1,10 @@
 """
 transaction_producer.py
 
-Kafka'ya sürekli akan, gerçekçi ve içine bilinçli olarak
-sahtekarlık (fraud) pattern'leri gömülmüş sentetik işlem verisi üretir.
+Continuously generates realistic synthetic transaction data with
+intentionally embedded fraud patterns and streams it to Kafka.
 
-Faz 1 hedefi: Uçtan uca boru hattının ilk halkası.
+Phase 1 goal: the first link of the end-to-end pipeline.
 """
 
 import json
@@ -21,11 +21,11 @@ fake = Faker()
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
 TOPIC_NAME = "transactions"
 
-# Sürekli işlem yapan sahte kullanıcı havuzu (bazıları "kötü niyetli" davranacak)
+# Pool of simulated users making continuous transactions (some behave maliciously)
 USER_POOL_SIZE = 200
 USERS = [str(uuid.uuid4()) for _ in range(USER_POOL_SIZE)]
 
-# Bazı kullanıcıları "fraud'a yatkın" olarak işaretle (senaryo üretimi için)
+# Mark a subset of users as "fraud-prone" (for scenario generation)
 FRAUD_PRONE_USERS = set(random.sample(USERS, k=int(USER_POOL_SIZE * 0.05)))
 
 
@@ -48,15 +48,15 @@ def generate_normal_transaction():
         "location": random_location(),
         "device_id": str(uuid.uuid4())[:8],
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "is_fraud_label": False,  # ground truth - sadece değerlendirme için, model bunu görmemeli
+        "is_fraud_label": False,  # ground truth - for evaluation only, the model must not see this
     }
 
 
 def generate_fraud_transaction():
     """
-    Bilinen fraud pattern'lerinden birini simüle eder:
-    - anormal yüksek tutar
-    - "imkansız hız" (kısa sürede farklı ülkeden işlem)
+    Simulates one of two known fraud patterns:
+    - abnormally high amount
+    - "impossible velocity" (transaction from a different country too soon)
     """
     user_id = random.choice(list(FRAUD_PRONE_USERS))
     pattern = random.choice(["high_amount", "impossible_velocity"])
@@ -85,8 +85,8 @@ def create_producer() -> KafkaProducer:
 
 def run(events_per_second: float = 5.0, fraud_ratio: float = 0.03):
     producer = create_producer()
-    print(f"[producer] {TOPIC_NAME} topic'ine yazmaya başlıyor "
-          f"(~{events_per_second} olay/sn, fraud oranı ~%{fraud_ratio*100:.0f})")
+    print(f"[producer] starting to write to topic '{TOPIC_NAME}' "
+          f"(~{events_per_second} events/sec, fraud ratio ~{fraud_ratio*100:.0f}%)")
 
     delay = 1.0 / events_per_second
 
@@ -98,12 +98,12 @@ def run(events_per_second: float = 5.0, fraud_ratio: float = 0.03):
                 txn = generate_normal_transaction()
 
             producer.send(TOPIC_NAME, value=txn)
-            print(f"[producer] gönderildi -> user={txn['user_id'][:8]} "
+            print(f"[producer] sent -> user={txn['user_id'][:8]} "
                   f"amount={txn['amount']} fraud={txn['is_fraud_label']}")
 
             time.sleep(delay)
     except KeyboardInterrupt:
-        print("\n[producer] durduruluyor...")
+        print("\n[producer] stopping...")
     finally:
         producer.flush()
         producer.close()

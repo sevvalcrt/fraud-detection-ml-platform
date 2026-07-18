@@ -1,147 +1,147 @@
-# Uçtan Uca Ölçeklenebilir ML Platformu — Proje Yol Haritası
+# End-to-End Scalable ML Platform — Project Roadmap
 
-**Senaryo:** Gerçek zamanlı işlem verisi üzerinden sahtekarlık (fraud) tespiti
-**Tema:** Dağıtık sistemler + veri mühendisliği + ölçeklenebilirlik + gözlemlenebilirlik
-**Tahmini süre:** ~9 hafta (haftada 10-12 saat varsayımıyla)
-**Önceki proje ile bağlantı:** Network security monitor'de "anomali tespiti" yapmıştın; burada aynı fikri (anormal davranışı yakalama) çok daha büyük ve üretim kalitesinde bir sistemde uyguluyorsun.
+**Scenario:** Real-time fraud detection on transaction data
+**Theme:** Distributed systems + data engineering + scalability + observability
+**Estimated duration:** ~9 weeks (assuming 10-12 hours/week)
+**Connection to previous project:** The network security monitor project focused on "anomaly detection"; here the same idea (catching abnormal behavior) is applied inside a much larger, production-grade system.
 
-> Not: Süre veya kapsam sana uymuyorsa haftaları birleştirip sıkıştırmak ya da genişletmek kolay — yapı modüler.
+> Note: if the duration or scope doesn't fit you, weeks can easily be compressed or expanded — the structure is modular.
 
 ---
 
-## Genel Mimari
+## Overall Architecture
 
 ```
-[Olay Üreteci] → [Kafka] → [Stream Processor] → [Feature Store]
+[Event Generator] → [Kafka] → [Stream Processor] → [Feature Store]
                                                         ↓
-                                              [Model Eğitim + MLflow]
+                                              [Model Training + MLflow]
                                                         ↓
-[İstemci] → [FastAPI Serving] ← [Model Registry]
+[Client] → [FastAPI Serving] ← [Model Registry]
         ↓
-[Prometheus + Grafana] (tüm katmanları izler)
+[Prometheus + Grafana] (monitors all layers)
         ↓
-[Docker + Kubernetes] (tüm katmanları barındırır)
+[Docker + Kubernetes] (hosts all layers)
         ↓
-[CI/CD Pipeline] (kod/model her değiştiğinde otomatik test + deploy)
+[CI/CD Pipeline] (auto test + deploy on every code/model change)
 ```
 
-Her katman ayrı bir hafta/hedef olarak ilerleyecek. Amaç: her aşamanın sonunda **çalışan, gösterilebilir bir demo** olması — bu hem motivasyonu korur hem de CV/mülakat için ara kilometre taşları verir.
+Each layer becomes a weekly goal. The aim: a **working, demoable result** at the end of every phase — this keeps motivation up and gives concrete milestones for CV/interviews.
 
 ---
 
-## Faz 1: Temel ve Veri Akışı (Hafta 1-2)
+## Phase 1: Foundation and Data Streaming (Week 1-2)
 
-**Hedef:** Gerçekçi, sürekli akan işlem verisi üreten ve Kafka'ya yazan bir sistem kurmak.
+**Goal:** Build a system that generates realistic, continuously flowing transaction data and writes it to Kafka.
 
-- Kafka'yı Docker Compose ile ayağa kaldır (tek broker yeterli, cluster'a gerek yok başta)
-- Sahte ama gerçekçi işlem verisi üreten bir script yaz (Python + Faker kütüphanesi): kullanıcı ID, tutar, konum, cihaz, zaman damgası
-- İçine kasıtlı olarak "fraud pattern"leri gömüle: aynı kullanıcının kısa sürede farklı ülkelerden işlem yapması, anormal yüksek tutar, gece yarısı ani aktivite artışı gibi
-- Bu veriyi sürekli Kafka topic'ine akıt (örn. saniyede 5-10 işlem)
+- Spin up Kafka with Docker Compose (a single broker is enough at this stage, no need for a cluster)
+- Write a script that generates realistic synthetic transaction data (Python + Faker library): user ID, amount, location, device, timestamp
+- Intentionally embed "fraud patterns": the same user transacting from different countries in a short time, abnormally high amounts, sudden activity spikes at odd hours, etc.
+- Continuously stream this data into a Kafka topic (e.g. 5-10 transactions/sec)
 
-**Öğrenilecek kavramlar:** Kafka producer/consumer, topic/partition mantığı, event-driven mimari
+**Concepts learned:** Kafka producer/consumer, topic/partition mechanics, event-driven architecture
 
-**Kilometre taşı:** `kafka-console-consumer` ile topic'e akan veriyi canlı izleyebiliyor olman.
-
----
-
-## Faz 2: Stream Processing ve Feature Engineering (Hafta 3-4)
-
-**Hedef:** Ham işlem verisini modelin anlayacağı özelliklere (feature) dönüştürmek.
-
-- Kafka'dan veriyi okuyan bir consumer/processor yaz (başta basit Python consumer yeterli, istersen sonra Spark Structured Streaming'e geç)
-- Anlamlı feature'lar türet: kullanıcının son 1 saatteki işlem sayısı, ortalama tutardan sapma, son işlemle bu işlem arası mesafe/süre oranı (imkansız hız tespiti)
-- Bu feature'ları basit bir "feature store"da tut (başta Redis yeterli — hız kritik olduğu için gerçek sistemlerde de böyle yapılır)
-
-**Öğrenilecek kavramlar:** Stream processing, sliding window hesaplamaları, feature store kavramı, neden batch değil stream gerektiği
-
-**Kilometre taşı:** Kafka'ya bir işlem geldiğinde, o kullanıcı için feature'ların Redis'te otomatik güncellendiğini gösterebiliyor olman.
+**Milestone:** Being able to watch the data flowing into the topic live with `kafka-console-consumer`.
 
 ---
 
-## Faz 3: Model Eğitimi ve Versiyonlama (Hafta 5)
+## Phase 2: Stream Processing and Feature Engineering (Week 3-4)
 
-**Hedef:** Bir sahtekarlık tespit modeli eğitmek — ama asıl odak modelin kendisi değil, **nasıl yönetildiği**.
+**Goal:** Transform raw transaction data into features the model can understand.
 
-- Ürettiğin sentetik veriyle basit bir sınıflandırma modeli eğit (XGBoost veya Random Forest — burada karmaşık bir model şart değil)
-- MLflow kur: her eğitim denemesini (hyperparameter, metrik, veri versiyonu) otomatik logla
-- Model registry mantığını kur: "hangi model versiyonu şu an production'da" sorusuna cevap verebilen bir sistem
+- Write a consumer/processor that reads from Kafka (a simple Python consumer is fine at first, you can move to Spark Structured Streaming later)
+- Derive meaningful features: number of transactions by the user in the last hour, deviation from average amount, distance/time ratio between consecutive transactions (impossible-speed detection)
+- Store these features in a simple "feature store" (Redis is enough at first — speed is critical here, which is why real systems do this too)
 
-**Öğrenilecek kavramlar:** Deney takibi (experiment tracking), model versiyonlama, reproducibility (aynı sonucu tekrar üretebilme)
+**Concepts learned:** Stream processing, sliding-window computations, the feature store concept, why streaming instead of batch is needed here
 
-**Kilometre taşı:** MLflow arayüzünde birden fazla model denemesini yan yana karşılaştırabiliyor olman.
-
-**Not:** Bu proje bir "ML araştırma projesi" değil, "ML mühendisliği projesi" — model doğruluğu %95 mi %89 mu çok önemli değil, sistemin bunu nasıl yönettiği önemli.
+**Milestone:** Being able to demonstrate that when a transaction arrives on Kafka, that user's features are automatically updated in Redis.
 
 ---
 
-## Faz 4: Serving ve Ölçeklenebilirlik (Hafta 6-7)
+## Phase 3: Model Training and Versioning (Week 5)
 
-**Hedef:** Modeli gerçek zamanlı tahmin yapan, yatayda ölçeklenen bir API haline getirmek.
+**Goal:** Train a fraud detection model — but the real focus is **how it's managed**, not the model itself.
 
-- FastAPI ile modeli bir REST/gRPC endpoint arkasında sun (`/predict` gibi)
-- Endpoint'i Dockerize et
-- Kubernetes'e deploy et (yerelde Minikube veya Kind yeterli, bulut gerekmez)
-- **Yatay ölçekleme testi yap:** Aynı anda 2, sonra 5, sonra 10 pod ile sistemin nasıl davrandığını ölç
-- Load testing (Locust veya k6) ile sisteme yük bindir, saniyede kaç tahmin işleyebildiğini ölç
+- Train a simple classification model on your synthetic data (XGBoost or Random Forest — no need for anything complex here)
+- Set up MLflow: automatically log every training run (hyperparameters, metrics, data version)
+- Set up model registry logic: a system that can answer "which model version is currently in production"
 
-**Öğrenilecek kavramlar:** Konteynerleştirme, orkestrasyon, yatay ölçekleme, load balancing, latency vs throughput trade-off'u
+**Concepts learned:** Experiment tracking, model versioning, reproducibility
 
-**Kilometre taşı:** "Sistemim saniyede X tahmin yapabiliyor, Y pod ile bu Z'ye çıkıyor" gibi **somut, ölçülmüş bir sayı** elde etmen. Bu CV'de en güçlü cümlelerden biri olacak.
+**Milestone:** Being able to compare multiple training runs side by side in the MLflow UI.
 
----
-
-## Faz 5: Gözlemlenebilirlik (Hafta 8)
-
-**Hedef:** Sistemi "kara kutu" olmaktan çıkarıp izlenebilir hale getirmek.
-
-- Prometheus ile sistem metriklerini topla: latency, hata oranı, throughput
-- **Model drift** metriği ekle: zamanla gelen verinin dağılımı değiştiğinde (örn. fraud pattern'leri değiştiğinde) bunu tespit eden bir mekanizma — bu, gerçek ML platformlarının en zor ve en değerli parçalarından biri
-- Grafana'da canlı dashboard kur: hem sistem sağlığını hem model performansını tek ekranda göster
-
-**Öğrenilecek kavramlar:** Observability üçlüsü (metrics/logs/traces), model drift kavramı, alerting
-
-**Kilometre taşı:** Dashboard'a bakarak "sistem şu an sağlıklı mı, model kötüleşiyor mu" sorusuna saniyeler içinde cevap verebiliyor olman.
+**Note:** This is not an "ML research project" but an "ML engineering project" — whether the model's accuracy is 95% or 89% doesn't matter much; how the system manages it does.
 
 ---
 
-## Faz 6: CI/CD ve Cilalama (Hafta 9)
+## Phase 4: Serving and Scalability (Week 6-7)
 
-**Hedef:** Sistemi "elle çalıştırılan demo"dan "gerçek yazılım mühendisliği ürünü"ne taşımak.
+**Goal:** Turn the model into a real-time prediction API that scales horizontally.
 
-- GitHub Actions ile: kod push edildiğinde otomatik test çalıştır, yeni model versiyonu geldiğinde otomatik deploy pipeline'ı kur
-- README'yi profesyonelleştir: mimari diyagramı, kurulum adımları, ölçüm sonuçları (Faz 4'teki sayılar), ekran görüntüleri/GIF
-- Kısa bir demo videosu/GIF çek (mülakatlarda ve LinkedIn'de paylaşmak için altın değerinde)
+- Serve the model behind a REST/gRPC endpoint with FastAPI (e.g. `/predict`)
+- Dockerize the endpoint
+- Deploy to Kubernetes (Minikube or Kind locally is enough, no cloud needed)
+- **Run a horizontal scaling test:** measure how the system behaves with 2, then 5, then 10 pods
+- Load test (Locust or k6) to put load on the system and measure predictions/sec
 
-**Kilometre taşı:** Bir yabancının repo'yu klonlayıp README'yi takip ederek sistemi kendi bilgisayarında ayağa kaldırabilmesi.
+**Concepts learned:** Containerization, orchestration, horizontal scaling, load balancing, the latency vs. throughput trade-off
+
+**Milestone:** Getting a **concrete, measured number** like "my system handles X predictions/sec, and this scales to Z with Y pods." This will be one of the strongest lines on your CV.
 
 ---
 
-## Kritik Tavsiyeler
+## Phase 5: Observability (Week 8)
 
-1. **Her fazın sonunda dur ve ölç.** "Çalışıyor" yetmez, "şu sayıda saniyede şu kadar işlem işliyor" gibi somut metrikler CV ve mülakatta seni diğer adaylardan ayırır.
-2. **Basitten başla, karmaşıklaştır.** Spark yerine önce basit Python consumer, sonra gerek görürsen Spark'a geç. Erken karmaşıklık, projeyi bitirmemenin en büyük sebebi.
-3. **Zorlandığın yerleri not al.** Mülakatlarda en çok sorulan soru "en çok nerede zorlandın, nasıl çözdün" — bu notlar altın değerinde olacak.
-4. **Haftalık commit disiplini kur.** Küçük ve sık commit'ler, GitHub geçmişinin de bir CV parçası olduğunu unutma.
+**Goal:** Turn the system from a "black box" into something observable.
 
-## CV / LinkedIn için Taslak Cümle
+- Collect system metrics with Prometheus: latency, error rate, throughput
+- Add a **model drift** metric: a mechanism that detects when incoming data distribution shifts over time (e.g. when fraud patterns change) — this is one of the hardest and most valuable parts of real ML platforms
+- Build a live Grafana dashboard: show both system health and model performance on one screen
+
+**Concepts learned:** The observability triad (metrics/logs/traces), the model drift concept, alerting
+
+**Milestone:** Being able to answer "is the system healthy, is the model degrading?" within seconds just by looking at the dashboard.
+
+---
+
+## Phase 6: CI/CD and Polish (Week 9)
+
+**Goal:** Turn the system from a "manually run demo" into a real software engineering product.
+
+- Set up GitHub Actions: run automated tests on every push, auto-deploy pipeline when a new model version arrives
+- Polish the README: architecture diagram, setup steps, benchmark results (the numbers from Phase 4), screenshots/GIFs
+- Record a short demo video/GIF (worth its weight in gold for interviews and LinkedIn)
+
+**Milestone:** A stranger being able to clone the repo, follow the README, and get the system running on their own machine.
+
+---
+
+## Key Recommendations
+
+1. **Stop and measure at the end of every phase.** "It works" isn't enough — concrete metrics like "handles X requests/sec" are what set you apart from other candidates in your CV and interviews.
+2. **Start simple, add complexity later.** Use a simple Python consumer before Spark, move to Spark only if you actually need it. Early complexity is the #1 reason projects don't get finished.
+3. **Write down where you got stuck.** The most common interview question is "where did you struggle most, and how did you solve it" — these notes will be gold.
+4. **Commit weekly, and often.** Small, frequent commits — remember your GitHub history is part of your CV too.
+
+## CV / LinkedIn Draft Sentence
 
 *"Designed and built an end-to-end real-time fraud detection platform processing streaming transaction data via Kafka, with feature engineering, model versioning (MLflow), and horizontally scalable serving on Kubernetes — achieving [X] predictions/sec across [Y] replicas, with full observability via Prometheus/Grafana and automated CI/CD deployment."*
 
-(Köşeli parantezleri Faz 4'teki gerçek ölçümlerinle dolduracaksın.)
+(Fill in the brackets with your real measurements from Phase 4.)
 
 ---
 
-## Teknoloji Özeti
+## Tech Stack Summary
 
-| Katman | Teknoloji | Alternatif (daha hafif) |
+| Layer | Technology | Lighter alternative |
 |---|---|---|
-| Mesajlaşma | Apache Kafka | Redis Streams |
-| İşleme | Spark Structured Streaming | Python consumer + threading |
+| Messaging | Apache Kafka | Redis Streams |
+| Processing | Spark Structured Streaming | Python consumer + threading |
 | Feature Store | Redis | PostgreSQL |
-| Model Yönetimi | MLflow | Weights & Biases |
+| Model Management | MLflow | Weights & Biases |
 | Serving | FastAPI | Flask |
-| Konteynerleştirme | Docker | — |
-| Orkestrasyon | Kubernetes (Minikube/Kind) | Docker Compose (daha basit ama daha az etkileyici) |
-| İzleme | Prometheus + Grafana | — |
+| Containerization | Docker | — |
+| Orchestration | Kubernetes (Minikube/Kind) | Docker Compose (simpler, but less impressive) |
+| Monitoring | Prometheus + Grafana | — |
 | CI/CD | GitHub Actions | GitLab CI |
-| Yük testi | Locust / k6 | — |
+| Load Testing | Locust / k6 | — |
