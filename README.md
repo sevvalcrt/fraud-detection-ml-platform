@@ -10,7 +10,8 @@ An end-to-end, scalable machine learning platform for real-time fraud detection 
 - Two embedded fraud patterns for realistic testing: abnormally high amounts, and "impossible velocity" (transactions from different locations too quickly)
 - Kafka-based event streaming pipeline
 - Kafka UI for live visual inspection of the data stream
-- Redis instance provisioned for the upcoming feature store
+- Real-time feature engineering: per-user transaction velocity (last 1h count), running average amount, and geographic velocity anomaly detection (haversine distance + implied speed)
+- Redis-backed feature store, updated on every incoming transaction
 
 *(Planned: stream-based feature engineering, model training/versioning with MLflow, FastAPI serving on Kubernetes, Prometheus/Grafana monitoring, CI/CD — see [Roadmap](#roadmap))*
 
@@ -27,7 +28,7 @@ This is the first stage of a larger pipeline: later stages will consume this str
 
 - Python 3 (data generation, `kafka-python`, `Faker`)
 - Apache Kafka + Zookeeper (event streaming)
-- Redis (feature store — provisioned, not yet used)
+- Redis (feature store, updated in real time by the stream processor)
 - Docker Compose (local infrastructure)
 - Kafka UI (stream inspection)
 
@@ -43,7 +44,7 @@ cd fraud-detection-ml-platform
 cd infra
 docker compose up -d
 
-# 2. Install Python dependencies
+# 2. Install Python dependencies for the producer
 cd ../producer
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -54,6 +55,21 @@ python transaction_producer.py
 ```
 
 Watch the live stream in Kafka UI: **http://localhost:8080**
+
+```bash
+# 4. In a separate terminal, install and run the feature processor
+cd processor
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python feature_processor.py
+```
+
+Inspect the computed features for a given user directly in Redis:
+
+```bash
+docker exec redis redis-cli HGETALL user:<user_id>:features
+```
 
 ## Testing
 
@@ -69,7 +85,7 @@ docker exec -it kafka kafka-console-consumer \
 ## Roadmap
 
 - [x] Kafka infrastructure + synthetic transaction producer
-- [ ] Stream processing + feature store (Redis)
+- [x] Stream processing + feature store (Redis)
 - [ ] Model training + versioning (MLflow)
 - [ ] FastAPI serving + Kubernetes horizontal scaling + load testing
 - [ ] Observability (Prometheus/Grafana) + model drift detection
@@ -88,6 +104,14 @@ Fixed by configuring two separate listeners in `docker-compose.yml`: an internal
 **`ModuleNotFoundError: No module named 'kafka.vendor.six.moves'`**
 
 The original `kafka-python` package hasn't been updated since 2020 and is incompatible with recent Python versions. Switched to the actively maintained fork, `kafka-python-ng`, which is a drop-in replacement (same `from kafka import ...` API).
+
+**Kafka container repeatedly failing to start / `Timed out waiting for connection to Zookeeper`**
+
+This happened when Zookeeper didn't have enough memory available inside WSL2 to complete its handshake with Kafka in time, usually because other memory-heavy applications were running on the host at the same time. Closing unnecessary applications before starting Docker Desktop resolved it. A more permanent fix (not applied here, but worth knowing) is capping WSL2's memory via `.wslconfig`.
+
+**`ValueError: Invalid file descriptor: -1` when consuming from Kafka**
+
+A bug in `kafka-python-ng`'s consumer group coordination logic on Windows with recent Python versions. Since this project only ever runs a single consumer instance (no need for group-based load balancing), removing the `group_id` parameter from `KafkaConsumer` avoids the buggy code path entirely.
 
 ---
 
