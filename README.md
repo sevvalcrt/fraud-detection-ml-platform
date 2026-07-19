@@ -77,6 +77,20 @@ docker exec -it kafka kafka-console-consumer \
 
 Full weekly breakdown: [`docs/roadmap.md`](docs/roadmap.md)
 
+## Troubleshooting
+
+**Kafka UI couldn't connect to the broker ("Connection to node 1 could not be established")**
+
+Kafka needs to advertise different addresses depending on who's connecting to it: other containers on the same Docker network (like Kafka UI) need to reach it via its container name (`kafka:29092`), while processes running outside Docker (like the Python producer on the host machine) need to reach it via `localhost:9092`. The initial setup only advertised a single `localhost` address, which worked for the host-side producer but not for Kafka UI — from inside its own container, `localhost` pointed back to itself instead of to Kafka.
+
+Fixed by configuring two separate listeners in `docker-compose.yml`: an internal one (`PLAINTEXT_INTERNAL://kafka:29092`) for container-to-container traffic, and an external one (`PLAINTEXT://localhost:9092`) for host access, then pointing Kafka UI's bootstrap servers at the internal listener.
+
+**`ModuleNotFoundError: No module named 'kafka.vendor.six.moves'`**
+
+The original `kafka-python` package hasn't been updated since 2020 and is incompatible with recent Python versions. Switched to the actively maintained fork, `kafka-python-ng`, which is a drop-in replacement (same `from kafka import ...` API).
+
+---
+
 ## License
 
 MIT
